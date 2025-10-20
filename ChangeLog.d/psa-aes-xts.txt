@@ -1,0 +1,3 @@
+Features
+   * Add support for AES-XTS/PSA_ALG_XTS in PSA via enabling 512-bit 
+   AES key generation and import.

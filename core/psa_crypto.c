@@ -663,6 +663,7 @@ psa_status_t psa_import_key_into_slot(
 {
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
     psa_key_type_t type = attributes->type;
+    size_t key_bits;
 
     /* zero-length keys are never supported. */
     if (data_length == 0) {
@@ -671,9 +672,27 @@ psa_status_t psa_import_key_into_slot(
 
     if (key_type_is_raw_bytes(type)) {
         *bits = PSA_BYTES_TO_BITS(data_length);
+        key_bits = *bits;
+
+#if defined(MBEDTLS_PSA_BUILTIN_ALG_XTS)
+#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_AES)
+        if (attributes->policy.alg == PSA_ALG_XTS) {
+            /* XTS mode requires a double-size key for the underlying block cipher.
+             * Currently only AES is supported (PSA also allows ARIA, DES, CAMELLIA, SM4).
+             * To validate key size, set key bits to half.
+             * XTS does not use 192-bit keys. */
+            if (attributes->type == PSA_KEY_TYPE_AES) {
+                if (key_bits == 384) {
+                    return PSA_ERROR_INVALID_ARGUMENT;
+                }
+                key_bits = key_bits / 2;
+            }
+        }
+#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_AES) */
+#endif /* defined(MBEDTLS_PSA_BUILTIN_ALG_XTS) */
 
         status = psa_validate_unstructured_key_bit_size(attributes->type,
-                                                        *bits);
+                                                        key_bits);
         if (status != PSA_SUCCESS) {
             return status;
         }
@@ -8395,6 +8414,7 @@ psa_status_t psa_generate_key_custom(const psa_key_attributes_t *attributes,
     psa_status_t status;
     psa_key_slot_t *slot = NULL;
     size_t key_buffer_size;
+    size_t key_bits;
 
     *key = MBEDTLS_SVC_KEY_ID_INIT;
 
@@ -8430,8 +8450,28 @@ psa_status_t psa_generate_key_custom(const psa_key_attributes_t *attributes,
     if (slot->key.bytes == 0) {
         if (PSA_KEY_LIFETIME_GET_LOCATION(attributes->lifetime) ==
             PSA_KEY_LOCATION_LOCAL_STORAGE) {
+            key_bits = attributes->bits;
+
+#if defined(MBEDTLS_PSA_BUILTIN_ALG_XTS)
+#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_AES)
+            if (psa_get_key_algorithm(attributes) == PSA_ALG_XTS) {
+                /* XTS mode requires a double-size key for the underlying block cipher.
+                 * Currently only AES is supported (PSA also allows ARIA, DES, CAMELLIA, SM4).
+                 * To validate key size, set key bits to half.
+                 * XTS does not use 192-bit keys. */
+                if (attributes->type == PSA_KEY_TYPE_AES) {
+                    if (key_bits == 384) {
+                        status = PSA_ERROR_INVALID_ARGUMENT;
+                        goto exit;
+                    }
+                    key_bits = key_bits / 2;
+                }
+            }
+#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_AES) */
+#endif /* defined(MBEDTLS_PSA_BUILTIN_ALG_XTS) */
+
             status = psa_validate_key_type_and_size_for_key_generation(
-                attributes->type, attributes->bits);
+                attributes->type, key_bits);
             if (status != PSA_SUCCESS) {
                 goto exit;
             }
